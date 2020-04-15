@@ -5,6 +5,7 @@
 #include<stdio.h>
 #include<errno.h>
 #include<sys/ioctl.h>
+#include<string.h>
 
 
 #define CTRL_KEY(k) ((k) & 0x1f)      // turns off bit 7, 6 and 5 of the char
@@ -16,6 +17,28 @@ struct editorConfig{
 };
 
 struct editorConfig E;
+
+/*** append buffer **/
+struct abuf{
+    char *b;
+    int len;
+};
+
+#define ABUF_INIT {NULL, 0}
+
+void abAppend(struct abuf *ab, const char *s, int len){
+    char *new = realloc(ab->b, ab->len + len);
+
+    if(new == NULL)
+        return;
+    memcpy(&new[ab->len], s, len);
+    ab->b = new;
+    ab->len += len;
+}
+
+void abFree(struct abuf *ab){
+    free(ab->b);
+}
 
 void die(char *s){
     write(STDOUT_FILENO, "\x1b[2J",4);  
@@ -114,24 +137,35 @@ void editorProcessKeypress(){
 }
 
 
-void editorDrawRows(){
+void editorDrawRows(struct abuf *ab){
     int y;
-    for(y = 0; y < E.screenrows-1; y++){
-        write(STDOUT_FILENO, "~\r\n", 3);
+    for(y = 0; y < E.screenrows ; y++){
+        abAppend(ab, "~", 1);
+
+        if(y < E.screenrows - 1){
+            abAppend(ab, "\r\n", 2);
+        }
     }
-    write(STDOUT_FILENO, "~", 1);
+    
 }
 
 
 void editorRefreshScreen(){
-    write(STDOUT_FILENO, "\x1b[2J",4);  // 033 is 27. Every Escape sequence starts with 27.
-                                        // We can also use x1b in place of 033. It gets 
-                                        // translated to 27.
-    write(STDOUT_FILENO, "\x1b[H", 3);  // Reposition the cursor at the top-left of screen
+    struct abuf ab = ABUF_INIT;
 
-    editorDrawRows();
-    write(STDOUT_FILENO, "\x1b[H", 3);
+    abAppend(&ab, "\x1b[?25l", 6);
+    abAppend(&ab, "\x1b[2J", 4);
+    abAppend(&ab, "\x1b[H", 3);
+
+    editorDrawRows(&ab);
+
+    abAppend(&ab, "\x1b[H", 3);
+    abAppend(&ab, "\x1b[?25h", 6);
+
+    write(STDOUT_FILENO, ab.b, ab.len);
+    abFree(&ab);
 }
+
 
 void initEditor(){
     if(getWindowSize(&E.screenrows, &E.screencols) == -1)
